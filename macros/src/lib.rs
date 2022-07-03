@@ -1,34 +1,67 @@
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn, Pat, ReturnType};
+use quote::{__private::Span, quote};
+use syn::{
+    parse::Parse, parse_macro_input, Expr, ExprPath, FnArg, Ident, ItemFn, Pat, ReturnType, Token,
+};
 
-// #[derive(Debug)]
-// struct PartialInput {
-//     f: Ident,
-//     arg: Ident,
-// }
+enum Arg {
+    Arg(Expr),
+    Elided,
+}
 
-// impl Parse for PartialInput {
-//     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-//         let thing = input.parse()?;
-//     }
-// }
+struct PartialInput {
+    f: ExprPath,
+    args: Vec<Arg>,
+}
+
+impl Parse for PartialInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let f = input.parse()?;
+        let mut args = Vec::new();
+        loop {
+            let lookahead = input.lookahead1();
+            if lookahead.peek(Token![_]) {
+                input.parse::<Expr>()?;
+                args.push(Arg::Elided);
+            } else if let Ok(arg) = input.parse() {
+                args.push(Arg::Arg(arg));
+            } else {
+                break;
+            }
+        }
+        Ok(Self { f, args })
+    }
+}
 
 /// ```rust
 /// let f = |a, b, c| a + b + c;
-/// partial! { f 1 2 } // -> |c| 1 + 2 + c
-/// partial! { f 1 } // -> |b, c| 1 + b + c
+/// partial! { f 1 2 _ } // -> |c| f(1, 2, c)
+/// partial! { f 1 _ _ } // -> |b, c| f(1, b, c)
 /// ```
-// #[proc_macro]
-// pub fn partial(item: TokenStream) -> TokenStream {
-//     let item = parse_macro_input!(item as PartialInput);
-//     let expanded = quote! {
-//         {
-//             move |arg|
-//         }
-//     };
-//     TokenStream::from(expanded)
-// }
+#[proc_macro]
+pub fn partial(item: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(item as PartialInput);
+    let f = &item.f;
+    // let args = &item.args;
+    let closure_args = item
+        .args
+        .iter()
+        .enumerate()
+        .filter(|(_, arg)| if let Arg::Elided = arg { true } else { false })
+        .map(|(i, _)| Ident::new(&format!("x{}", i)[..], Span::call_site()));
+    let call_args = item.args.iter().enumerate().map(|(i, arg)| match arg {
+        Arg::Elided => {
+            let ident = Ident::new(&format!("x{}", i)[..], Span::call_site());
+            quote! { #ident }
+        }
+        Arg::Arg(expr) => {
+            quote! { #expr }
+        }
+    });
+    TokenStream::from(quote! {
+        |#(#closure_args),*| #f(#(#call_args),*)
+    })
+}
 
 /// ```rust
 /// #[curry]

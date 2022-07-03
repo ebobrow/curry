@@ -1,6 +1,6 @@
 pub use macros::curry;
+pub use macros::partial;
 
-// TODO: macro
 pub fn partial<A: Copy, B, C>(f: impl Fn(A, B) -> C, arg1: A) -> impl Fn(B) -> C {
     move |arg2| f(arg1, arg2)
 }
@@ -22,5 +22,11 @@ mod tests {
             a + b + c
         }
         assert_eq!(6, add3(1)(2)(3));
+    }
+
+    #[test]
+    fn partial_macro() {
+        let f = |a, b, c| a + b + c;
+        assert_eq!(f(1, 2, 3), partial! { f _ 2 _ }(1, 3));
     }
 }
